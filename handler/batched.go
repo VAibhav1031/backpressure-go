@@ -104,7 +104,7 @@ func FlowManager(jobchan chan UserDetails, collector chan []UserDetails) {
 
 func BatchManager(collector chan []UserDetails, dbSender chan []UserDetails) {
 
-	t := time.NewTicker(850 * time.Millisecond)
+	t := time.NewTicker(1500 * time.Millisecond)
 
 	var rqueue []UserDetails
 	for {

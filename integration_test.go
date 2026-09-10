@@ -96,7 +96,7 @@ func TestTheDamnServer2(t *testing.T) {
 
 	router := MakeServerHandler(jobChan)
 
-	for i := 0; i < 2500; i++ {
+	for i := 0; i < 3500; i++ {
 
 		for _, test := range test_samples {
 			st, _ := json.Marshal(test)
