@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -82,26 +83,28 @@ func FlowManager(jobchan chan UserDetails, collector chan []UserDetails) {
 	var det []UserDetails
 	for {
 		select {
-		// case <-jobchan:
-		// 	if len(jobchan) >= 5000 {
-		// 		//send to the collector channel
-		// 	}
 
 		case <-t.C:
-			rate := (1 / 4 * (5000))
+			rate := (5000 / 6)
+			// cap thing brother ....
+			if len(jobchan) < rate {
+				rate = len(jobchan)
+			}
+			log.Println("rate:", rate)
 			for i := 0; i <= rate; i++ {
-
 				det = append(det, <-jobchan)
 			}
 
+			log.Printf("[Flow]:  Send the %v batch to the collector", len(det))
 			collector <- det
+			det = nil
 		}
 	}
 }
 
 func BatchManager(collector chan []UserDetails, dbSender chan []UserDetails) {
 
-	t := time.NewTicker(710 * time.Millisecond)
+	t := time.NewTicker(850 * time.Millisecond)
 
 	var rqueue []UserDetails
 	for {
@@ -109,10 +112,13 @@ func BatchManager(collector chan []UserDetails, dbSender chan []UserDetails) {
 		case collection := <-collector:
 			if len(rqueue) >= 3000 {
 				dbSender <- rqueue
+				rqueue = nil
 			}
 			rqueue = append(rqueue, collection...)
 		case <-t.C:
+			// log.Println("[Timer-out]:  Send the batch to the DbSender ")
 			dbSender <- rqueue
+			rqueue = nil
 
 		}
 
@@ -130,10 +136,14 @@ func (w *DbPooler) DBWorker(wg *sync.WaitGroup, dbSender chan []UserDetails) {
 			return
 		}
 
-		err := w.dbCommit(context.Background(), batch) //let this function be the private it is not needed to be imported
-		if err != nil {
-			fmt.Printf("dbCommit Error: %v", err)
-			tries++
+		if len(batch) >= 1 {
+			err := w.dbCommit(context.Background(), batch) //let this function be the private it is not needed to be imported
+			if err != nil {
+				fmt.Printf("dbCommit Error: %v", err)
+				tries++
+			} else {
+				fmt.Printf("Commited this batch %v\n", len(batch))
+			}
 		}
 	}
 }
@@ -143,7 +153,7 @@ type taskSource struct {
 	tasks []UserDetails
 }
 
-// ------------------------------------
+// -----------TaskSoure-RELATED----------------------
 func (s *taskSource) Next() bool {
 	s.index++
 	return s.index < len(s.tasks)
@@ -167,8 +177,8 @@ func (w *DbPooler) dbCommit(ctx context.Context, batch []UserDetails) error {
 
 	_, err := w.dbPool.CopyFrom(
 		ctx,
-		pgx.Identifier{"tasks"},
-		[]string{"usernname", "mfa_code", "display_name"},
+		pgx.Identifier{"user_tab"},
+		[]string{"username", "mfa_code", "display_name"},
 		// pgx.CopyFromRows(rows),
 		source,
 	)

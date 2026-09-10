@@ -1,20 +1,44 @@
+//go:build integration
+
 package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	// "net/http"
+	"github.com/VAibhav1031/backpressure-go/handler"
+	"github.com/joho/godotenv"
+	"log"
 	"net/http/httptest"
+	"os"
+	"sync"
 	"testing"
 	"time"
-
-	"github.com/VAibhav1031/backpressure-go/handler"
 )
 
-func TestTheDamnServer(t *testing.T) {
+func TestTheDamnServer2(t *testing.T) {
+	fmt.Println("Integration-Test Started...")
 
-	fmt.Println("Test Server Started...")
+	err := godotenv.Load() // loading .env file
+	if err != nil {
+		log.Println("No .env file found, using system enviromentt ..")
+	}
+
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatalf("DATABASE_URL not set: '%v'", dbURL)
+	}
+
+	pool := handler.ConnectDB(dbURL) // connecting to the DB , will get the pool connection
+	defer pool.Close()
+
+	err = pool.Ping(context.Background())
+	if err != nil {
+		log.Fatalf("Database is reachable but not responding: %v", err)
+	} else {
+		log.Println("DB!! , ALL SET ")
+	}
 
 	test_samples := []handler.UserDetails{
 		{
@@ -32,17 +56,47 @@ func TestTheDamnServer(t *testing.T) {
 			MfaCode:     "0934023",
 			DisplayName: "mono_loco",
 		},
+		{
+			Username:    "choco_laty_12",
+			MfaCode:     "145766",
+			DisplayName: "laty_raise990",
+		},
 	}
 
+	worker := handler.NewPooler(pool)
 	// i need to loop these thing for 1500-1800 req ,   but after hitting  that we would wait and stat thing again would be nice to go
 	var too_many, accepted int
+
 	jobChan := make(chan handler.UserDetails, 5000)
-	collector := make(chan []handler.UserDetails, 1000)
+	collector := make(chan []handler.UserDetails, 2000)
+	dbSender := make(chan []handler.UserDetails, 3000)
+	defer close(jobChan)
+	defer close(collector)
+	defer close(dbSender)
+
+	// --------------DB_WORKER_MNMNT_START-------
+	wg := &sync.WaitGroup{}
+	server_stop := make(chan struct{})
+	go func() {
+		wg.Wait()
+		fmt.Println("Error ,DBWorker Got some Error's")
+		server_stop <- struct{}{}
+	}()
+	// ------------DB_WORKERK_MNGMNT_END---------
+
+	for i := 0; i <= 3; i++ {
+		wg.Add(1)
+		log.Printf("%d DB worker started", i)
+		go worker.DBWorker(wg, dbSender)
+	}
 
 	go handler.FlowManager(jobChan, collector)
+
+	go handler.BatchManager(collector, dbSender)
+
 	router := MakeServerHandler(jobChan)
 
-	for i := 0; i < 1805; i++ {
+	for i := 0; i < 2500; i++ {
 
 		for _, test := range test_samples {
 			st, _ := json.Marshal(test)
@@ -70,17 +124,17 @@ func TestTheDamnServer(t *testing.T) {
 
 			if resp_det.Code == "ACCEPTED" {
 				accepted++
-				fmt.Println("Accepted")
+				// fmt.Println("Accepted")
 			} else if resp_det.Code == "TOO_MANY_REQUESTS" {
 				too_many++
-				fmt.Println("Too Many Request")
+				// fmt.Println("Too Many Request")
 			} else {
 				t.Errorf("Incorrect 'CODE' : %v", resp_det.Code)
 			}
 
 		}
 		// just for simulation work real time , even though it is not but still
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 
 	}
 	fmt.Printf("\nResult Too-Many-Request: %d, Accepted: %d", too_many, accepted)

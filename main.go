@@ -41,7 +41,8 @@ func main() {
 	err = pool.Ping(context.Background())
 	if err != nil {
 		log.Fatalf("Database is reachable but not responding: %v", err)
-
+	} else {
+		log.Println("DB!! , ALL SET ")
 	}
 	//--------------DB handling end----------------------
 
@@ -51,6 +52,7 @@ func main() {
 	dbSender := make(chan []handler.UserDetails, 3000)
 	defer close(jobchan)
 	defer close(collector)
+	defer close(dbSender)
 
 	// handling db Workers
 	worker := handler.NewPooler(pool)
@@ -67,10 +69,14 @@ func main() {
 
 	for i := 0; i <= 3; i++ {
 		wg.Add(1)
+		log.Printf("%d DB worker started", i)
 		go worker.DBWorker(wg, dbSender)
 	}
 
+	// Traffic inflow-manager
 	go handler.FlowManager(jobchan, collector)
+
+	go handler.BatchManager(collector, dbSender)
 
 	// handler..
 	mux := MakeServerHandler(jobchan)
@@ -84,10 +90,12 @@ func main() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
+	log.Println("Server Started")
 	server.ListenAndServe()
+
 	select {
 	case <-server_stop:
-		fmt.Println("Server Going Down.... ")
+		log.Println("Server Going Down.... ")
 		return
 	}
 }
